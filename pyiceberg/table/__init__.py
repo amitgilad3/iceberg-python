@@ -568,6 +568,44 @@ class Transaction:
                 )
                 for data_file in data_files:
                     append_files.append_data_file(data_file)
+    def rewrite(
+        self,
+        new_data_files: List[DataFile],
+        replaced_data_files: List[DataFile],
+        snapshot_properties: Dict[str, str] = EMPTY_DICT,
+    ) -> None:
+        """
+        Shorthand for replacing data files in a table.
+
+        Args:
+            new_data_files: A list of DataFiles to be added to the table
+            replaced_data_files: A list of DataFiles to be replaced in the table
+        """
+
+        with self.update_snapshot(snapshot_properties=snapshot_properties).rewrite() as rewrite_snapshot:
+            commit_uuid = uuid.uuid4()
+
+            #works when created from dataframe
+            # added_data_files = _dataframe_to_data_files(
+            #     table_metadata=self.table_metadata, write_uuid=commit_uuid, df=df, io=self._table.io
+            # )
+            # added_data_files  = [DataFile(file_path=added_files[0], file_format=FileFormat.PARQUET, file_size_in_bytes=1925, record_count=1)]
+
+            # replaced_files =  [DataFile(file_path=deleted_files[0], file_format=FileFormat.PARQUET, file_size_in_bytes=1925)]
+
+            # replaced_files = _parquet_files_to_data_files(
+            #     table_metadata=self.table_metadata, file_paths=deleted_files, io=self._table.io
+            # )
+            # added_data_files = _parquet_files_to_data_files(
+            #     table_metadata=self.table_metadata, file_paths=added_files, io=self._table.io
+            # )
+            rewrite_snapshot.commit_uuid = commit_uuid
+            for new_data_file in new_data_files:
+                rewrite_snapshot.append_data_file(new_data_file)
+            for original_data_file in replaced_data_files:
+                rewrite_snapshot.delete_data_file(original_data_file)
+
+
 
     def delete(
         self,
@@ -1113,7 +1151,20 @@ class Table:
             tx.overwrite(
                 df=df, overwrite_filter=overwrite_filter, case_sensitive=case_sensitive, snapshot_properties=snapshot_properties
             )
+    def rewrite(
+        self,
+        added_files: List[DataFile],
+        deleted_files: List[DataFile],
+        snapshot_properties: Dict[str, str] = EMPTY_DICT,
+    ) -> None:
+        """
+        Shorthand for rewriting files in the table.
 
+        """
+        with self.transaction() as tx:
+            tx.rewrite(
+                new_data_files=added_files, replaced_data_files=deleted_files, snapshot_properties=snapshot_properties
+            )
     def delete(
         self,
         delete_filter: Union[BooleanExpression, str] = ALWAYS_TRUE,
@@ -1631,6 +1682,17 @@ class AddFileTask:
 
 
 def _parquet_files_to_data_files(table_metadata: TableMetadata, file_paths: List[str], io: FileIO) -> Iterable[DataFile]:
+    """Convert a list files into DataFiles.
+
+    Returns:
+        An iterable that supplies DataFiles that describe the parquet files.
+    """
+    from pyiceberg.io.pyarrow import parquet_files_to_data_files
+
+    yield from parquet_files_to_data_files(io=io, table_metadata=table_metadata, file_paths=iter(file_paths))
+
+
+def _parquet_files_to_data_file(table_metadata: TableMetadata, file_paths: List[str], io: FileIO) -> Iterable[DataFile]:
     """Convert a list files into DataFiles.
 
     Returns:
